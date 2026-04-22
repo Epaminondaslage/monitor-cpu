@@ -115,15 +115,7 @@ sudo systemctl restart nginx
 sudo systemctl restart php8.3-fpm
 ```
 
-### 4. Symlink (se necessário)
-
-O browser pode acessar via `monitor_cpu` (underscore) ou `monitor-cpu` (hífen):
-
-```bash
-ln -s /var/www/html/monitor-cpu /var/www/html/monitor_cpu
-```
-
-### 5. Instalar dependências opcionais
+### 4. Instalar dependências opcionais
 
 ```bash
 # I/O de disco
@@ -133,7 +125,7 @@ sudo apt install sysstat -y
 sudo apt install pciutils -y
 ```
 
-### 6. Usar o script de setup automático
+### 5. Usar o script de setup automático
 
 O projeto inclui `setup-sentinela.sh` que faz tudo acima automaticamente:
 
