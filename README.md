@@ -1,578 +1,237 @@
+# Sentinela — Monitor CPU
 
-
-# Monitoramento de CPU – Servidor Ubuntu com Docker (Frigate)
-
-## Servidor
-
-10.0.0.139/var/www/html/monitor-cpu
-
-## Objetivo
-
-Implementar um sistema de monitoramento técnico para o servidor responsável pela execução do ambiente **Sentinela** e **Docker**, permitindo:
-
-* detecção rápida de sobrecarga
-* monitoramento visual em tempo real
-* histórico de desempenho do servidor
-* análise técnica após travamentos
-* acompanhamento de containers Docker
-
-O sistema combina duas camadas de monitoramento:
-
-**1️⃣ Monitoramento em tempo real (Dashboard Web)**
-**2️⃣ Monitoramento histórico profissional (Sysstat / SAR)**
+Dashboard web de monitoramento em tempo real para servidores Linux.  
+Compatível com **ARM** (Orange Pi, Raspberry Pi) e **x86** (Intel, AMD) com ou sem GPU dedicada.
 
 ---
 
-# 1. Arquitetura do Sistema de Monitoramento
+## Servidores Monitorados
 
-O monitoramento implementado possui três componentes principais:
+| IP | Descrição |
+|---|---|
+| 10.0.0.139 | Servidor ARM — Frigate NVR |
+| 10.0.0.141 | Servidor ARM |
+| 10.0.0.5 | Servidor ARM |
+| 10.0.0.37 | Servidor ARM |
+| 10.0.2.148 | Servidor Intel — GPU NVIDIA RTX 3050, Docker |
+
+---
+
+## Estrutura do Projeto
 
 ```
 /var/www/html/monitor-cpu/
-
-index.html     → Dashboard Web
-style.css      → Estilo do painel
-api.php        → API de coleta de métricas
+├── index.html      → Dashboard web (CSS inline, sem dependências de path)
+├── api.php         → API de coleta de métricas (JSON)
+└── css/
+    └── style.css   → Estilo (referenciado apenas como fallback)
 ```
 
-O dashboard consome dados da API via **AJAX a cada 3 segundos**.
+O dashboard consome `/monitor-cpu/api.php` via AJAX a cada **3 segundos**.
 
 ---
 
-# 2. Métricas Monitoradas
-
-O painel coleta e apresenta:
+## Métricas Monitoradas
 
 ### CPU
-
-* Uso total de CPU
-* Uso por core
-* Histórico gráfico
+- Uso total (gauge com agulha)
+- Uso por core (gráfico de barras, colorido por intensidade)
+- Histórico em tempo real
 
 ### Temperatura
-
-Temperatura do SoC do servidor.
-
-Fonte:
-
-```
-/sys/class/thermal/thermal_zone0/temp
-```
+- Detectada automaticamente por plataforma:
+  - **Intel/AMD**: `hwmon` → `coretemp` / `k10temp`
+  - **NVIDIA**: `nvidia-smi`
+  - **ARM**: `thermal_zone*` (zonas priorizadas por tipo)
+- Gauge SVG com escala 0–80°C
+- Card ocultado automaticamente se sensor indisponível
 
 ### Load Average
-
-Indicador de carga do sistema:
-
-```
-sys_getloadavg()
-```
+- Gráfico histórico (1m, 5m, 15m)
 
 ### Memória RAM
+- Fonte: `/proc/meminfo` (`MemAvailable`)
+- Barra com cor dinâmica: verde < 60%, laranja < 80%, vermelho ≥ 80%
 
-* RAM utilizada
-* RAM total
-* Barra de uso em tempo real
-
-Fonte:
-
-```
-free -m
-```
-
-### Uso de Disco
-
-* Espaço utilizado
-* Espaço total
-* Barra visual de utilização
-
-Fonte:
-
-```
-disk_total_space()
-disk_free_space()
-```
-
-### IO de Disco
-
-Taxa de leitura e escrita.
-
-Fonte:
-
-```
-iostat -dx
-```
+### Disco
+- Espaço usado / total na partição `/`
+- I/O de leitura e escrita em KB/s via `iostat` (colunas detectadas dinamicamente)
+- Fallback via `/proc/diskstats` se `iostat` não disponível
 
 ### Containers Docker
+- Lista completa com estado: `running`, `exited`, `restarting`, `paused`
+- Acesso via socket `/var/run/docker.sock` (sem sudo)
+- Card com erro de diagnóstico se `www-data` não tiver permissão
 
-Lista de containers com estado:
-
-* running
-* exited
-* restarting
-
-Fonte:
-
-```
-docker ps -a
-```
-
-### Container Frigate
-
-Monitoramento específico do consumo de CPU do Frigate.
-
-Fonte:
-
-```
-docker stats frigate
-```
+### Frigate (opcional)
+- Card visível apenas se container `frigate` estiver presente
+- Não exibe erro se ausente
 
 ---
 
-# 3. Interface Web do Dashboard
-
-O dashboard apresenta:
-
-* Gauge de CPU
-* Gauge de temperatura
-* Gráfico de load average
-* Gráfico de CPU do Frigate
-* Gráfico de IO de disco
-* Gráfico de CPU por core
-* Barra de RAM
-* Barra de uso de disco
-* Lista de containers Docker
-
-Atualização automática a cada:
-
-```
-3 segundos
-```
-
-A interface utiliza:
-
-* Chart.js
-* GaugeJS
-* JavaScript Fetch API
-
----
-
-# 4. Instalação do Sysstat (Monitoramento Histórico Profissional)
-
-## Instalar
-
-```
-apt update
-apt install sysstat -y
-```
-
-## Ativar
-
-```
-systemctl enable sysstat
-systemctl start sysstat
-```
-
-## Verificar status
-
-```
-systemctl status sysstat
-```
-
-Status esperado:
-
-```
-Active: active (exited)
-```
-
-Esse comportamento é normal pois o serviço é acionado por timers.
-
----
-
-# 5. Confirmar Timers Ativos
-
-```
-systemctl list-timers | grep sysstat
-```
-
-Devem aparecer:
-
-```
-sysstat-collect.timer
-sysstat-summary.timer
-```
-
----
-
-# 6. Verificar Arquivos de Log
-
-```
-ls -lh /var/log/sysstat/
-```
-
-Arquivos gerados:
-
-```
-sa01
-sa02
-sa03
-...
-```
-
-Cada arquivo corresponde ao dia do mês.
-
----
-
-# 7. Consultar Histórico
-
-## Uso geral de CPU
-
-```
-sar -u
-```
-
-## Load average
-
-```
-sar -q
-```
-
-## CPU por core
-
-```
-sar -P ALL
-```
-
-## Analisar dia específico
-
-```
-sar -u -f /var/log/sysstat/sa22
-```
-
----
-
-# 8. Alterar Coleta para 1 Minuto
-
-Editar:
-
-```
-nano /etc/cron.d/sysstat
-```
-
-Substituir:
-
-```
-5-55/10 * * * * root command -v debian-sa1 > /dev/null && debian-sa1 1 1
-```
-
-Por:
-
-```
-* * * * * root command -v debian-sa1 > /dev/null && debian-sa1 1 1
-```
-
-Reiniciar:
-
-```
-systemctl restart sysstat
-```
-
----
-
-# 9. Aumentar Retenção para 30 Dias
-
-Editar:
-
-```
-nano /etc/sysstat/sysstat
-```
-
-Alterar:
-
-```
-HISTORY=7
-```
-
-Para:
-
-```
-HISTORY=30
-```
-
-Reiniciar:
-
-```
-systemctl restart sysstat
-```
-
----
-
-# 10. Monitoramento em Tempo Real (CLI)
-
-## CPU ao vivo
-
-```
-sar -u 1 3
-```
-
-## Load atual
-
-```
-uptime
-```
-
-## Monitoramento detalhado
-
-```
-htop
-```
-
----
-
-# 11. Interpretação Técnica
-
-### Servidor com 8 CPUs
-
-| Load  | Situação  |
-| ----- | --------- |
-| 0 – 2 | Excelente |
-| 2 – 4 | Normal    |
-| 4 – 6 | Atenção   |
-| 6 – 8 | Pesado    |
-| > 8   | Saturado  |
-
----
-
-# 12. Indicadores de Problema
-
-Sinais de saturação do servidor:
-
-* `%idle < 10%`
-* `%iowait elevado`
-* Load maior que número de CPUs
-* travamento de SSH
-* aumento repentino de IO de disco
-* containers Docker reiniciando
-
----
-
-# 13. Diagnóstico Pós-Travamento
-
-Após reiniciar o servidor:
-
-```
-sar -u -f /var/log/sysstat/saXX
-sar -q -f /var/log/sysstat/saXX
-sar -P ALL -f /var/log/sysstat/saXX
-```
-
-Substituir **XX** pelo dia correspondente.
-
----
-
-# 14. Ambiente Monitorado
-
-Servidor configurado com:
-
-* Ubuntu Linux
-* Docker
-* Frigate NVR
-* 8 CPUs
-* 16 GB RAM
-* armazenamento local para gravações
-* histórico de métricas com Sysstat
-* dashboard web de monitoramento em tempo real
-
----
-
-# 15. Dependências do Sistema
-
-Para funcionamento completo do sistema de monitoramento, o servidor deve possuir os seguintes componentes instalados.
-
----
-
-# Dependências do Servidor (Backend)
-
-## PHP
-
-Responsável por executar a API de coleta de métricas.
-
-Instalação:
-
-```bash
-apt install php php-cli -y
-```
-
-Verificar:
-
-```bash
-php -v
-```
-
----
-
-## Servidor Web
-
-Pode ser utilizado:
-
-* Apache
-* Nginx
-
-Exemplo (Apache):
-
-```bash
-apt install apache2 -y
-```
-
-Diretório utilizado no projeto:
-
-```
-/var/www/html/monitor-cpu/
-```
-
----
-
-## Sysstat
-
-Utilizado para monitoramento histórico do servidor.
-
-Instalação:
-
-```bash
-apt install sysstat -y
-```
-
-Ferramentas fornecidas:
-
-* sar
-* iostat
-* mpstat
-* pidstat
-
----
-
-## Docker
-
-Necessário para monitorar containers e o Frigate.
-
-Instalação:
-
-```bash
-apt install docker.io -y
-```
-
-Verificar:
-
-```bash
-docker ps
-```
-
----
-
-## Permissão Docker para o Apache
-
-Para permitir que a API PHP execute comandos docker:
-
-```bash
-usermod -aG docker www-data
-systemctl restart apache2
-```
-
----
-
-# Dependências do Frontend (Dashboard)
-
-O dashboard utiliza bibliotecas JavaScript carregadas via CDN.
-
----
-
-## Chart.js
-
-Responsável pelos gráficos de:
-
-* Load
-* Disk IO
-* CPU por core
-* Frigate CPU
-
-Fonte:
+## Requisitos
+
+### Sistema
+
+| Componente | Obrigatório | Observação |
+|---|---|---|
+| PHP 7.4+ | ✅ | PHP 8.3 recomendado |
+| Nginx ou Apache | ✅ | Detectado automaticamente |
+| PHP-FPM | ✅ (Nginx) | Deve estar no grupo `docker` |
+| Docker | Opcional | Para listar containers |
+| iostat (sysstat) | Opcional | Para I/O de disco |
+| lspci (pciutils) | Opcional | Para detecção de GPU |
+| nvidia-smi | Opcional | Para GPU NVIDIA |
+
+### Frontend (CDN)
 
 ```
 https://cdn.jsdelivr.net/npm/chart.js
-```
-
----
-
-## GaugeJS
-
-Responsável pelos medidores circulares:
-
-* CPU
-* Temperatura
-
-Fonte:
-
-```
 https://cdn.jsdelivr.net/npm/gaugeJS/dist/gauge.min.js
 ```
 
 ---
 
-# Dependências de Comandos Linux Utilizados
+## Instalação
 
-A API utiliza comandos do sistema operacional para coleta de métricas.
-
-| Comando              | Função                 |
-| -------------------- | ---------------------- |
-| `free`               | Uso de memória         |
-| `iostat`             | IO de disco            |
-| `docker stats`       | CPU de containers      |
-| `docker ps`          | Status de containers   |
-| `/proc/stat`         | CPU por core           |
-| `/sys/class/thermal` | Temperatura do sistema |
-
----
-
-# Dependências de Diretórios do Sistema
-
-| Caminho                                 | Utilização              |
-| --------------------------------------- | ----------------------- |
-| `/proc/stat`                            | leitura de CPU          |
-| `/sys/class/thermal/thermal_zone0/temp` | temperatura             |
-| `/`                                     | cálculo de uso de disco |
-| `/var/log/sysstat`                      | histórico de métricas   |
-
----
-
-# Resumo das Dependências
-
-Sistema mínimo necessário:
-
-```
-Ubuntu Server
-Apache ou Nginx
-PHP
-Docker
-Sysstat
-Chart.js
-GaugeJS
-```
-
----
-
-# Verificação Completa do Ambiente
-
-Executar no servidor:
+### 1. Copiar arquivos
 
 ```bash
-php -v
-docker ps
-sar -u
-iostat
+cp -r monitor-cpu/ /var/www/html/
 ```
 
-Se todos responderem corretamente, o sistema está pronto para uso.
+### 2. Permissões
+
+```bash
+sudo chown -R epaminondas:www-data /var/www/html/monitor-cpu
+sudo chmod -R 775 /var/www/html/monitor-cpu
+```
+
+### 3. Configurar acesso ao Docker
+
+```bash
+sudo usermod -aG docker www-data
+sudo systemctl restart nginx
+sudo systemctl restart php8.3-fpm
+```
+
+### 4. Symlink (se necessário)
+
+O browser pode acessar via `monitor_cpu` (underscore) ou `monitor-cpu` (hífen):
+
+```bash
+ln -s /var/www/html/monitor-cpu /var/www/html/monitor_cpu
+```
+
+### 5. Instalar dependências opcionais
+
+```bash
+# I/O de disco
+sudo apt install sysstat -y
+
+# Detecção de GPU
+sudo apt install pciutils -y
+```
+
+### 6. Usar o script de setup automático
+
+O projeto inclui `setup-sentinela.sh` que faz tudo acima automaticamente:
+
+```bash
+sudo bash /var/www/html/local-server-status/setup-sentinela.sh
+```
 
 ---
 
+## Acesso
 
+```
+http://IP_DO_SERVIDOR/monitor-cpu/
+```
 
+---
+
+## Monitoramento Histórico (Sysstat / SAR)
+
+### Instalar e ativar
+
+```bash
+sudo apt install sysstat -y
+sudo systemctl enable --now sysstat
+```
+
+### Coleta a cada 1 minuto
+
+Editar `/etc/cron.d/sysstat`:
+
+```
+* * * * * root command -v debian-sa1 > /dev/null && debian-sa1 1 1
+```
+
+### Retenção de 30 dias
+
+Editar `/etc/sysstat/sysstat`:
+
+```
+HISTORY=30
+```
+
+```bash
+sudo systemctl restart sysstat
+```
+
+### Consultas úteis
+
+```bash
+# CPU geral
+sar -u
+
+# Load average
+sar -q
+
+# CPU por core
+sar -P ALL
+
+# Dia específico
+sar -u -f /var/log/sysstat/sa22
+```
+
+---
+
+## Interpretação do Load Average
+
+| Load (8 cores) | Situação |
+|---|---|
+| 0 – 2 | Excelente |
+| 2 – 4 | Normal |
+| 4 – 6 | Atenção |
+| 6 – 8 | Pesado |
+| > 8 | Saturado |
+
+---
+
+## Diagnóstico Pós-Travamento
+
+```bash
+# Substitua XX pelo dia do mês
+sar -u -f /var/log/sysstat/saXX
+sar -q -f /var/log/sysstat/saXX
+sar -P ALL -f /var/log/sysstat/saXX
+```
+
+---
+
+## Indicadores de Problema
+
+- `%idle < 10%`
+- `%iowait` elevado
+- Load maior que o número de cores
+- Containers com estado `restarting`
+- Aumento repentino de I/O de disco
+- SSH travando
+
+---
+
+## Autor
+
+**Epaminondas Lage** — Engenheiro / Desenvolvedor de Sistemas

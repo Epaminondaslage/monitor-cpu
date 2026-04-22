@@ -1,416 +1,346 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
-
 <head>
+<!--
+  ==========================================
+  INDEX.HTML - MONITOR CPU SENTINELA v3
+  ==========================================
+  Aplicacao : Sentinela Monitor CPU
+  Arquivo   : index.html
+  Versao    : 3.0 - reescrita completa
 
+  - CSS totalmente inline (sem style.css externo)
+  - Gauge CPU via GaugeJS (canvas sempre visivel)
+  - Gauge Temperatura via SVG puro
+  - Arquivo unico, sem dependencias de path
+  - Compativel ARM, x86, Intel, AMD
+  ==========================================
+-->
 <meta charset="UTF-8">
-<title>Sentinela Dasboard Server:10.0.0.139 </title>
-
-<link rel="stylesheet" href="style.css">
-
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sentinela Monitor</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/gaugeJS/dist/gauge.min.js"></script>
-
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+body{font-family:"Segoe UI",system-ui,Arial,sans-serif;background:#f1f5f9;color:#1e293b;padding-top:64px}
+.topbar{position:fixed;top:0;left:0;right:0;height:60px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;padding:0 20px;z-index:999}
+.t-left{display:flex;align-items:center;gap:12px}
+.t-right{display:flex;align-items:center;gap:14px}
+.logo{font-weight:700;font-size:15px}
+.srv{font-size:12px;color:#64748b;font-family:monospace}
+.conn{display:flex;align-items:center;gap:5px;font-size:12px;color:#64748b}
+.dot{width:8px;height:8px;border-radius:50%;background:#94a3b8;display:inline-block}
+.back{font-size:12px;color:#374151;text-decoration:none;padding:4px 10px;background:#f3f4f6;border-radius:6px}
+.alert-bar{background:#dc2626;color:#fff;text-align:center;padding:10px;font-weight:600;font-size:13px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;padding:16px;max-width:1400px;margin:0 auto}
+.card{background:#fff;border-radius:12px;padding:18px;border:1px solid #e2e8f0;box-shadow:0 1px 4px rgba(0,0,0,.05)}
+.card h3{font-size:11px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px}
+.gwrap{text-align:center}
+.gwrap canvas{width:200px!important;height:130px!important;display:block;margin:0 auto}
+.bignum{font-size:24px;font-weight:700;margin-top:6px;text-align:center}
+.bar-row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px}
+.bar-row span:last-child{color:#64748b;font-family:monospace}
+.bar-bg{height:10px;background:#e2e8f0;border-radius:8px;overflow:hidden;margin-bottom:14px}
+.bar-fg{height:100%;border-radius:8px;width:0%;background:#22c55e;transition:width .4s,background .4s}
+.crow{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f1f5f9;font-size:12px}
+.crow:last-child{border:none}
+.cname{flex:1;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cbadge{font-size:10px;font-weight:600;padding:2px 7px;border-radius:10px}
+.ok{color:#16a34a}.ok-bg{background:#dcfce7;color:#16a34a}
+.warn{color:#d97706}.warn-bg{background:#fef3c7;color:#d97706}
+.bad{color:#dc2626}.bad-bg{background:#fee2e2;color:#dc2626}
+.mute{color:#94a3b8}.mute-bg{background:#f1f5f9;color:#64748b}
+.loadsub{font-size:10px;color:#94a3b8;text-align:center;margin-top:6px;font-family:monospace}
+.dwarn{font-size:12px;color:#94a3b8;line-height:1.9}
+.dwarn code{background:#f1f5f9;padding:1px 5px;border-radius:4px;font-size:11px}
+canvas{max-height:180px}
+@media(max-width:600px){.grid{grid-template-columns:1fr;padding:10px;gap:10px}.srv{display:none}}
+</style>
 </head>
-
-
 <body>
 
-<h1>Sentinela Dasboard Server:10.0.0.139</h1>
+<div class="topbar">
+  <div class="t-left">
+    <span class="logo">&#11041; Sentinela</span>
+    <span class="srv" id="srvLabel">Conectando...</span>
+  </div>
+  <div class="t-right">
+    <span class="conn"><span class="dot" id="dot"></span><span id="connTxt">aguardando</span></span>
+    <a class="back" href="/local-server-status/">&#8592; Painel</a>
+  </div>
+</div>
 
-<div id="alert"></div>
-
+<div class="alert-bar" id="alertBar" style="display:none;"></div>
 
 <div class="grid">
 
+  <!-- CPU -->
+  <div class="card gwrap">
+    <h3>CPU Total</h3>
+    <canvas id="cpuGauge"></canvas>
+    <div class="bignum" id="cpuVal">-</div>
+  </div>
 
-<!-- CPU -->
+  <!-- TEMPERATURA -->
+  <div class="card gwrap" id="cardTemp" style="display:none;">
+    <h3>Temperatura</h3>
+    <svg viewBox="0 0 220 120" style="width:200px;height:120px;display:block;margin:0 auto;">
+      <path d="M 20 110 A 90 90 0 1 0 200 110" fill="none" stroke="#e2e8f0" stroke-width="16" stroke-linecap="round"/>
+      <!-- zona verde: 0° a 50°C = 0% a 62.5% do arco -->
+      <path d="M 20 110 A 90 90 0 0 0 137.8 24.4" fill="none" stroke="#22c55e" stroke-width="16" stroke-linecap="butt" opacity=".25"/>
+      <!-- zona laranja: 50°C a 70°C = 62.5% a 87.5% do arco -->
+      <path d="M 137.8 24.4 A 90 90 0 0 0 191.8 74.5" fill="none" stroke="#f59e0b" stroke-width="16" stroke-linecap="butt" opacity=".25"/>
+      <!-- zona vermelha: 70°C a 80°C = 87.5% a 100% do arco -->
+      <path d="M 191.8 74.5 A 90 90 0 0 0 200 110" fill="none" stroke="#ef4444" stroke-width="16" stroke-linecap="butt" opacity=".25"/>
+      <path id="tArc" d="" fill="none" stroke-width="16" stroke-linecap="round"/>
+      <line id="tNeedle" x1="110" y1="110" x2="20" y2="110" stroke="#1e293b" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="110" cy="110" r="5" fill="#1e293b"/>
+      <text x="12" y="122" font-size="10" fill="#94a3b8" text-anchor="middle">0</text>
+      <text x="138" y="12" font-size="10" fill="#94a3b8" text-anchor="middle">50</text>
+      <text x="208" y="122" font-size="10" fill="#94a3b8" text-anchor="middle">80</text>
+    </svg>
+    <div class="bignum" id="tempVal">-</div>
+  </div>
 
-<div class="card gauge-container">
+  <!-- LOAD -->
+  <div class="card">
+    <h3>Load Average</h3>
+    <canvas id="loadChart"></canvas>
+    <div class="loadsub" id="loadSub"></div>
+  </div>
 
-<h3>CPU Total</h3>
+  <!-- FRIGATE -->
+  <div class="card" id="cardFrigate" style="display:none;">
+    <h3>Frigate CPU (%)</h3>
+    <canvas id="frigateChart"></canvas>
+  </div>
 
-<canvas id="cpuGauge"></canvas>
+  <!-- DISK IO -->
+  <div class="card">
+    <h3>Disco I/O (KB/s)</h3>
+    <canvas id="diskChart"></canvas>
+  </div>
 
-<div id="cpuText" class="indicator"></div>
+  <!-- CPU CORE -->
+  <div class="card">
+    <h3>CPU por Core</h3>
+    <canvas id="coreChart"></canvas>
+  </div>
 
-</div>
+  <!-- RAM + DISCO -->
+  <div class="card">
+    <h3>Memoria e Disco</h3>
+    <div class="bar-row"><span>RAM</span><span id="ramTxt">-</span></div>
+    <div class="bar-bg"><div class="bar-fg" id="ramFg"></div></div>
+    <div class="bar-row"><span>Disco (/)</span><span id="dskTxt">-</span></div>
+    <div class="bar-bg"><div class="bar-fg" id="dskFg"></div></div>
+  </div>
 
-
-<!-- TEMP -->
-
-<div class="card gauge-container">
-
-<h3>Temperatura SoC</h3>
-
-<canvas id="tempGauge"></canvas>
-
-<div id="tempText" class="indicator"></div>
-
-</div>
-
-
-<!-- LOAD -->
-
-<div class="card">
-
-<h3>Load Average</h3>
-
-<canvas id="loadChart"></canvas>
-
-</div>
-
-
-<!-- FRIGATE -->
-
-<div class="card">
-
-<h3>Frigate CPU (%)</h3>
-
-<canvas id="frigateChart"></canvas>
-
-</div>
-
-
-<!-- DISK IO -->
-
-<div class="card">
-
-<h3>Disk IO</h3>
-
-<canvas id="diskChart"></canvas>
-
-</div>
-
-
-<!-- CPU CORE -->
-
-<div class="card">
-
-<h3>CPU por Core</h3>
-
-<canvas id="coreChart"></canvas>
-
-</div>
-
-
-<!-- RAM + DISCO -->
-
-<div class="card">
-
-<h3>Memória e Disco</h3>
-
-<div class="bar-title">RAM</div>
-
-<div class="ram-bar">
-<div id="ramFill"></div>
-</div>
-
-<div id="ramText" class="indicator"></div>
-
-
-<div class="bar-title">Disco</div>
-
-<div class="ram-bar">
-<div id="diskFill"></div>
-</div>
-
-<div id="diskText" class="indicator"></div>
+  <!-- CONTAINERS -->
+  <div class="card">
+    <h3>Containers Docker</h3>
+    <div id="dwarn" class="dwarn" style="display:none;">
+      Sem acesso ao Docker.<br>
+      <code>sudo usermod -aG docker www-data</code><br>
+      <code>sudo systemctl restart php8.3-fpm</code>
+    </div>
+    <div id="clist"></div>
+  </div>
 
 </div>
-
-
-<!-- CONTAINERS -->
-
-<div class="card">
-
-<h3>Containers</h3>
-
-<div id="containers"></div>
-
-</div>
-
-
-</div>
-
-
 
 <script>
+// --- GAUGE CPU ---
+var cpuG = new Gauge(document.getElementById('cpuGauge')).setOptions({
+  angle:0.05, lineWidth:0.25, radiusScale:0.9,
+  pointer:{length:0.6, strokeWidth:0.04, color:'#1e293b'},
+  limitMax:false, limitMin:false,
+  strokeColor:'#e2e8f0', generateGradient:true, highDpiSupport:true,
+  staticZones:[
+    {strokeStyle:'#22c55e',min:0,max:50},
+    {strokeStyle:'#f59e0b',min:50,max:80},
+    {strokeStyle:'#ef4444',min:80,max:100}
+  ],
+  staticLabels:{font:'10px sans-serif',labels:[50,80,100],color:'#94a3b8',fractionDigits:0}
+});
+cpuG.maxValue=100; cpuG.setMinValue(0); cpuG.animationSpeed=32; cpuG.set(0);
 
+// --- GAUGE TEMP SVG ---
+// Escala 0-80°C: mais realista para CPU em uso normal
+// Zonas: verde 0-50°C, laranja 50-70°C, vermelho 70-80°C+
+var TEMP_MAX = 80;
+function setTemp(t) {
+  var cx=110, cy=110, r=90;
+  var pct = Math.min(Math.max(t / TEMP_MAX, 0), 1);
+  var a   = Math.PI * (1 - pct);
+  var ex  = cx + r * Math.cos(a);
+  var ey  = cy - r * Math.sin(a);
+  var lg  = pct > 0.5 ? 1 : 0;
+  var col = t < 50 ? '#22c55e' : t < 70 ? '#f59e0b' : '#ef4444';
+  var arc = document.getElementById('tArc');
+  arc.setAttribute('stroke', col);
+  arc.setAttribute('d', pct < 0.01 ? '' :
+    'M 20 110 A ' + r + ' ' + r + ' 0 ' + lg + ' 0 ' + ex.toFixed(1) + ' ' + ey.toFixed(1));
+  var rn = r - 12;
+  var nd = document.getElementById('tNeedle');
+  nd.setAttribute('x2', (cx + rn * Math.cos(a)).toFixed(1));
+  nd.setAttribute('y2', (cy - rn * Math.sin(a)).toFixed(1));
+}
 
-const cpuGauge = new Gauge(
-document.getElementById("cpuGauge")
-).setOptions({
+// --- CHARTS ---
+var N=40;
+function mkLine(id,sets,yMax){
+  return new Chart(document.getElementById(id),{
+    type:'line',
+    data:{labels:[],datasets:sets.map(function(s){return{
+      label:s.label,data:[],borderColor:s.col,
+      backgroundColor:s.col+'18',borderWidth:1.5,
+      fill:true,tension:0.3,pointRadius:0
+    }})},
+    options:{
+      animation:false,responsive:true,
+      plugins:{legend:{display:sets.length>1}},
+      scales:{x:{display:false},y:{min:0,suggestedMax:yMax||2,grid:{color:'#f1f5f9'}}}
+    }
+  });
+}
 
-angle:0,
-lineWidth:0.25,
-radiusScale:0.9,
-
-pointer:{
-length:0.6,
-strokeWidth:0.04,
-color:"#000"
-},
-
-staticZones:[
-{strokeStyle:"#22c55e",min:0,max:50},
-{strokeStyle:"#facc15",min:50,max:80},
-{strokeStyle:"#ef4444",min:80,max:100}
-]
-
+var loadCh    = mkLine('loadChart',   [{label:'Load',   col:'#ef4444'}],2);
+var frigateCh = mkLine('frigateChart',[{label:'Frigate',col:'#22c55e'}],10);
+var diskCh    = mkLine('diskChart',   [{label:'Leitura',col:'#3b82f6'},{label:'Escrita',col:'#f59e0b'}]);
+var coreCh    = new Chart(document.getElementById('coreChart'),{
+  type:'bar',
+  data:{labels:[],datasets:[{data:[],backgroundColor:[],borderRadius:3}]},
+  options:{
+    animation:false,responsive:true,
+    plugins:{legend:{display:false}},
+    scales:{x:{grid:{display:false}},y:{min:0,max:100,grid:{color:'#f1f5f9'}}}
+  }
 });
 
-cpuGauge.maxValue=100;
-cpuGauge.setMinValue(0);
-
-
-
-const tempGauge = new Gauge(
-document.getElementById("tempGauge")
-).setOptions({
-
-angle:0,
-lineWidth:0.25,
-radiusScale:0.9,
-
-pointer:{
-length:0.6,
-strokeWidth:0.04,
-color:"#000"
-},
-
-staticZones:[
-{strokeStyle:"#22c55e",min:0,max:60},
-{strokeStyle:"#facc15",min:60,max:75},
-{strokeStyle:"#ef4444",min:75,max:100}
-]
-
-});
-
-tempGauge.maxValue=100;
-tempGauge.setMinValue(0);
-
-
-
-function createLineChart(ctx,label,color,maxY=100){
-
-return new Chart(ctx,{
-type:'line',
-
-data:{
-labels:[],
-datasets:[{
-label:label,
-data:[],
-borderColor:color,
-backgroundColor:color,
-fill:false,
-tension:0.2
-}]
-},
-
-options:{
-animation:false,
-responsive:true,
-scales:{y:{min:0,max:maxY}}
+function push(ch,vals,ts){
+  ch.data.labels.push(ts);
+  vals.forEach(function(v,i){ch.data.datasets[i].data.push(v);});
+  if(ch.data.labels.length>N){
+    ch.data.labels.shift();
+    ch.data.datasets.forEach(function(d){d.data.shift();});
+  }
+  ch.update('none');
 }
 
-});
+function barcol(p){return p<60?'#22c55e':p<80?'#f59e0b':'#ef4444';}
 
+function setBar(fgId,txtId,pct,lbl){
+  var fg=document.getElementById(fgId);
+  fg.style.width=pct+'%'; fg.style.background=barcol(pct);
+  document.getElementById(txtId).textContent=lbl;
 }
 
-
-
-const loadChart=createLineChart(
-document.getElementById('loadChart'),
-'Load','#ef4444',8
-);
-
-
-const frigateChart=createLineChart(
-document.getElementById('frigateChart'),
-'Frigate','#22c55e',200
-);
-
-
-
-const diskChart=new Chart(
-
-document.getElementById('diskChart'),
-
-{
-type:'line',
-
-data:{
-labels:[],
-datasets:[
-{label:'Read',data:[],borderColor:'#facc15'},
-{label:'Write',data:[],borderColor:'#ef4444'}
-]
-},
-
-options:{animation:false}
-
+function setConn(ok){
+  document.getElementById('dot').style.background=ok?'#22c55e':'#ef4444';
+  document.getElementById('connTxt').textContent=ok?'online':'offline';
 }
 
-);
-
-
-
-const coreChart=new Chart(
-
-document.getElementById('coreChart'),
-
-{
-type:'bar',
-
-data:{
-labels:[],
-datasets:[{
-data:[],
-backgroundColor:'#6366f1'
-}]
-},
-
-options:{
-animation:false,
-scales:{y:{min:0,max:100}}
+var ready=false;
+function init(d){
+  if(ready)return; ready=true;
+  document.getElementById('srvLabel').textContent=d.hostname+' - '+d.server_ip;
+  document.title='Sentinela - '+d.hostname;
+  if(d.frigate_present) document.getElementById('cardFrigate').style.display='';
 }
 
-}
-
-);
-
-
-
-function addData(chart,value){
-
-const now=new Date().toLocaleTimeString();
-
-chart.data.labels.push(now);
-chart.data.datasets[0].data.push(value);
-
-if(chart.data.labels.length>30){
-
-chart.data.labels.shift();
-chart.data.datasets[0].data.shift();
-
-}
-
-chart.update();
-
-}
-
-
-
+var errs=0;
 function update(){
+  fetch('/monitor-cpu/api.php')
+  .then(function(r){return r.json();})
+  .then(function(d){
+    var ts=new Date().toLocaleTimeString('pt-BR');
+    setConn(true); errs=0;
+    document.getElementById('alertBar').style.display='none';
+    init(d);
 
-fetch('/monitor-cpu/api.php')
+    // CPU
+    cpuG.set(d.cpu);
+    document.getElementById('cpuVal').textContent=d.cpu+' %';
+    if(d.cpu>90){
+      var ab=document.getElementById('alertBar');
+      ab.style.display=''; ab.textContent='CPU em '+d.cpu+'% - carga critica!';
+    }
 
-.then(r=>r.json())
+    // Temperatura
+    if(d.temp_available && d.temp>0){
+      document.getElementById('cardTemp').style.display='';
+      setTemp(d.temp);
+      document.getElementById('tempVal').textContent=d.temp+' °C';
+    }
 
-.then(data=>{
+    // Load
+    push(loadCh,[d.load],ts);
+    document.getElementById('loadSub').textContent=
+      '1m: '+d.load+'  5m: '+d.load_5m+'  15m: '+d.load_15m;
 
+    // Frigate
+    if(d.frigate_present){
+      document.getElementById('cardFrigate').style.display='';
+      push(frigateCh,[d.frigate_cpu],ts);
+    }
 
-cpuGauge.set(data.cpu);
-tempGauge.set(data.temp);
+    // Disk IO
+    push(diskCh,[d.disk_read,d.disk_write],ts);
 
-document.getElementById("cpuText").innerText=data.cpu+" %";
-document.getElementById("tempText").innerText=data.temp+" °C";
+    // Core
+    if(d.cores && Object.keys(d.cores).length){
+      var vals=Object.values(d.cores);
+      coreCh.data.labels=Object.keys(d.cores);
+      coreCh.data.datasets[0].data=vals;
+      coreCh.data.datasets[0].backgroundColor=vals.map(function(v){
+        return v<50?'#6366f1bb':v<80?'#f59e0bbb':'#ef4444bb';
+      });
+      coreCh.update('none');
+    }
 
+    // RAM
+    var rp=d.ram_total>0?Math.round(d.ram_used/d.ram_total*100):0;
+    setBar('ramFg','ramTxt',rp,d.ram_used+' MB / '+d.ram_total+' MB ('+rp+'%)');
 
-addData(loadChart,data.load);
-addData(frigateChart,data.frigate_cpu);
+    // Disco
+    var dp=d.disk_total>0?Math.round(d.disk_used/d.disk_total*100):0;
+    setBar('dskFg','dskTxt',dp,d.disk_used+' GB / '+d.disk_total+' GB ('+dp+'%)');
 
-
-
-const now=new Date().toLocaleTimeString();
-
-diskChart.data.labels.push(now);
-diskChart.data.datasets[0].data.push(data.disk_read);
-diskChart.data.datasets[1].data.push(data.disk_write);
-
-if(diskChart.data.labels.length>30){
-
-diskChart.data.labels.shift();
-diskChart.data.datasets[0].data.shift();
-diskChart.data.datasets[1].data.shift();
-
+    // Containers
+    var dw=document.getElementById('dwarn');
+    var cl=document.getElementById('clist');
+    if(!d.docker_ok){
+      dw.style.display=''; cl.innerHTML='';
+    } else {
+      dw.style.display='none';
+      if(d.containers && d.containers.length){
+        cl.innerHTML=d.containers.map(function(c){
+          var s=c.state==='running'    ?['ok','ok-bg']
+               :c.state==='exited'     ?['bad','bad-bg']
+               :c.state==='restarting' ?['warn','warn-bg']
+               :['mute','mute-bg'];
+          return '<div class="crow"><span class="'+s[0]+'">&#9679;</span>'
+               +'<span class="cname">'+c.name+'</span>'
+               +'<span class="cbadge '+s[1]+'">'+c.state+'</span></div>';
+        }).join('');
+      }
+    }
+  })
+  .catch(function(){
+    errs++;
+    setConn(false);
+    if(errs>3){
+      var ab=document.getElementById('alertBar');
+      ab.style.display='';
+      ab.textContent='Sem resposta da API. Verifique o servidor.';
+    }
+  });
 }
-
-diskChart.update();
-
-
-
-if(data.cores){
-
-coreChart.data.labels=Object.keys(data.cores);
-coreChart.data.datasets[0].data=Object.values(data.cores);
-coreChart.update();
-
-}
-
-
-
-let ramPercent=(data.ram_used/data.ram_total)*100;
-
-document.getElementById("ramFill").style.width=ramPercent+"%";
-
-document.getElementById("ramText").innerText=
-data.ram_used+" MB / "+data.ram_total+" MB";
-
-
-
-let diskPercent=(data.disk_used/data.disk_total)*100;
-
-document.getElementById("diskFill").style.width=diskPercent+"%";
-
-document.getElementById("diskText").innerText=
-data.disk_used+" GB / "+data.disk_total+" GB";
-
-
-
-if(data.containers){
-
-let html="";
-
-data.containers.forEach(c=>{
-
-let color="status-ok";
-
-if(c.state==="exited") color="status-danger";
-if(c.state==="restarting") color="status-warning";
-
-html+=`
-<div class="container-row">
-<span class="${color}">●</span>
-${c.name}
-<span class="container-state">${c.state}</span>
-</div>
-`;
-
-});
-
-document.getElementById("containers").innerHTML=html;
-
-}
-
-
-
-});
-
-}
-
-
 
 setInterval(update,3000);
-
 update();
-
-
 </script>
-
-
 </body>
 </html>
