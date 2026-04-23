@@ -26,6 +26,12 @@
  * ==========================================
  */
 
+// ==========================================
+// CORS — permite acesso do fleet.php
+// (painel central em outro servidor da rede)
+// ==========================================
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET');
 header('Content-Type: application/json');
 error_reporting(0);
 
@@ -180,8 +186,10 @@ function detectarTemperatura() {
     }
 
     if (!empty($thermalTemps)) {
-        // Prioriza tipos conhecidos de CPU
-        foreach (['cpu-thermal', 'soc-thermal', 'cpu', 'pkg-temp-0'] as $preferred) {
+        // Prioriza tipos conhecidos de CPU/SoC
+        // Jetson: 'CPU-therm', 'GPU-therm', 'AO-therm', 'PMIC-Die'
+        foreach (['cpu-thermal', 'soc-thermal', 'cpu', 'pkg-temp-0',
+                  'CPU-therm', 'AO-therm', 'Tboard_tegra', 'Tdiode_tegra'] as $preferred) {
             if (isset($thermalTemps[$preferred])) {
                 return round($thermalTemps[$preferred], 1);
             }
@@ -199,7 +207,7 @@ function detectarTemperatura() {
                 foreach ($values as $key => $val) {
                     if (is_array($val)) {
                         foreach ($val as $k => $v) {
-                            if (str_contains(strtolower($k), 'temp') && is_numeric($v)) {
+                            if (strpos(strtolower($k), 'temp') !== false && is_numeric($v)) {
                                 if ($v > 10 && $v < 120) return round($v, 1);
                             }
                         }
@@ -230,9 +238,32 @@ $diskRead  = 0;
 $diskWrite = 0;
 
 function parseIostat() {
-    // Tenta detectar o dispositivo principal (não loop, não dm-)
-    $devices = safeExec("lsblk -dno NAME,TYPE 2>/dev/null | grep -E 'disk' | grep -vE 'loop' | awk '{print $1}' | head -1");
-    $device  = $devices ?: 'sda'; // fallback
+    // Detecta dispositivo principal — ordem de prioridade:
+    // 1. lsblk (moderno)
+    // 2. /proc/diskstats direto (funciona em kernel 4.9 do Jetson)
+    // Suporta: sda, nvme0n1, mmcblk0 (Jetson/RPi/eMMC)
+    $device = null;
+
+    $lsblk = safeExec("lsblk -dno NAME,TYPE 2>/dev/null | grep -E '\\bdisk\\b' | grep -vE 'loop|ram' | awk '{print \$1}' | head -1");
+    if ($lsblk) {
+        $device = trim($lsblk);
+    }
+
+    // Fallback: lê /proc/diskstats e pega primeiro dispositivo real
+    if (!$device && file_exists('/proc/diskstats')) {
+        $lines = file('/proc/diskstats') ?: [];
+        foreach ($lines as $l) {
+            $p = preg_split('/\s+/', trim($l));
+            $name = $p[2] ?? '';
+            // Aceita sda, nvme0n1, mmcblk0, vda — não aceita partições nem ram
+            if (preg_match('/^(sd[a-z]|nvme\d+n\d+|mmcblk\d+|vda)$/', $name)) {
+                $device = $name;
+                break;
+            }
+        }
+    }
+
+    $device = $device ?: 'sda';
 
     // iostat com intervalo 1s, 2 amostras (descarta a primeira que é desde o boot)
     $io = safeExec("iostat -dx 1 2 2>/dev/null");
@@ -251,9 +282,9 @@ function parseIostat() {
     $dataLine = null;
 
     foreach ($linhas as $linha) {
-        if (str_contains($linha, 'Device')) {
+        if (strpos($linha, 'Device') !== false) {
             $header = preg_split('/\s+/', trim($linha));
-        } elseif ($header && (str_contains($linha, $device) || preg_match('/^\s*(sd|nvme|vd|hd|mmcblk)/', $linha))) {
+        } elseif ($header && (strpos($linha, $device) !== false || preg_match('/^\s*(sd|nvme|vd|hd|mmcblk)/', $linha))) {
             $dataLine = preg_split('/\s+/', trim($linha));
             break;
         }
@@ -330,7 +361,7 @@ if ($dockerBin && is_readable('/var/run/docker.sock')) {
         $dockerOk = true;
         foreach (explode("\n", $dockerList) as $line) {
             $line = trim($line);
-            if (!$line || !str_contains($line, '|')) continue;
+            if (!$line || !strpos($line, '|') !== false) continue;
             $parts = explode('|', $line, 3);
             $containers[] = [
                 'name'   => trim($parts[0] ?? ''),
@@ -338,11 +369,12 @@ if ($dockerBin && is_readable('/var/run/docker.sock')) {
                 'status' => trim($parts[2] ?? ''),
             ];
         }
-        // Ordena: running primeiro
-        usort($containers, fn($a, $b) =>
-            ($a['state'] === 'running' ? 0 : 1) <=>
-            ($b['state'] === 'running' ? 0 : 1)
-        );
+        // Ordena: running primeiro (compatível PHP 7.2)
+        usort($containers, function($a, $b) {
+            $pa = ($a['state'] === 'running') ? 0 : 1;
+            $pb = ($b['state'] === 'running') ? 0 : 1;
+            return $pa - $pb;
+        });
     }
 }
 
@@ -372,9 +404,17 @@ $serverIp = $_SERVER['SERVER_ADDR'] ?? gethostbyname($hostname);
 // Detecta plataforma para o frontend saber o contexto
 $platform = 'unknown';
 if (file_exists('/proc/device-tree/model')) {
-    $platform = 'arm';
+    $model = strtolower(rtrim(trim(file_get_contents('/proc/device-tree/model')), "\0"));
+    if (strpos($model, 'jetson') !== false || strpos($model, 'tegra') !== false) {
+        $platform = 'jetson';
+    } else {
+        $platform = 'arm';
+    }
 } elseif (file_exists('/sys/class/dmi/id/product_name')) {
     $platform = 'x86';
+} elseif (file_exists('/proc/cpuinfo')) {
+    $cpuinfo = file_get_contents('/proc/cpuinfo');
+    if (preg_match('/tegra/i', $cpuinfo)) $platform = 'jetson';
 }
 
 // Detecta se temperatura está disponível
