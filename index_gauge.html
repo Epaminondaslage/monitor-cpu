@@ -82,11 +82,56 @@ canvas{max-height:180px}
     <div class="bignum" id="cpuVal">-</div>
   </div>
 
-  <!-- TEMPERATURA — display 7 segmentos -->
+  <!-- TEMPERATURA -->
   <div class="card gwrap" id="cardTemp" style="display:none;">
     <h3>Temperatura</h3>
-    <div id="tempDisplay" style="margin:12px auto 8px;display:inline-block;"></div>
-    <div class="bignum" id="tempVal" style="font-size:13px;color:#94a3b8;margin-top:2px;">-</div>
+    <svg viewBox="0 0 220 130" style="width:200px;height:130px;display:block;margin:0 auto;">
+      <!--
+        Arco semicircular: cx=110 cy=115 r=85
+        Circunferência total = 2*PI*85 = 534
+        Semicírculo (180°) = 267
+        Zonas (escala 0-80°C):
+          Verde  0-50°C  = 62.5% = 167px
+          Laranja 50-70°C = 25%  =  67px
+          Vermelho 70-80°C = 12.5% = 33px
+        stroke-dasharray="comprimento total_circunf"
+        rotate(-180) para começar da esquerda
+      -->
+      <!-- trilho de fundo -->
+      <path d="M 25 115 A 85 85 0 0 1 195 115"
+            fill="none" stroke="#e5e7eb" stroke-width="14" stroke-linecap="round"/>
+
+      <!-- zona verde: 0–50°C -->
+      <path d="M 25 115 A 85 85 0 0 1 195 115"
+            fill="none" stroke="#22c55e" stroke-width="14" stroke-linecap="butt"
+            stroke-dasharray="167 267" stroke-dashoffset="0" opacity="0.3"/>
+
+      <!-- zona laranja: 50–70°C -->
+      <path d="M 25 115 A 85 85 0 0 1 195 115"
+            fill="none" stroke="#f59e0b" stroke-width="14" stroke-linecap="butt"
+            stroke-dasharray="67 267" stroke-dashoffset="-167" opacity="0.3"/>
+
+      <!-- zona vermelha: 70–80°C -->
+      <path d="M 25 115 A 85 85 0 0 1 195 115"
+            fill="none" stroke="#ef4444" stroke-width="14" stroke-linecap="butt"
+            stroke-dasharray="33 267" stroke-dashoffset="-234" opacity="0.3"/>
+
+      <!-- arco de progresso (preenchido dinamicamente pelo JS) -->
+      <path id="tArc" d="M 25 115 A 85 85 0 0 1 195 115"
+            fill="none" stroke-width="14" stroke-linecap="round"
+            stroke-dasharray="0 267" stroke="#22c55e"/>
+
+      <!-- agulha -->
+      <line id="tNeedle" x1="110" y1="115" x2="25" y2="115"
+            stroke="#1e293b" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="110" cy="115" r="5" fill="#1e293b"/>
+
+      <!-- labels -->
+      <text x="20"  y="130" font-size="10" fill="#94a3b8" text-anchor="middle">0</text>
+      <text x="110" y="22"  font-size="10" fill="#94a3b8" text-anchor="middle">50</text>
+      <text x="200" y="130" font-size="10" fill="#94a3b8" text-anchor="middle">80</text>
+    </svg>
+    <div class="bignum" id="tempVal">-</div>
   </div>
 
   <!-- LOAD -->
@@ -152,87 +197,37 @@ var cpuG = new Gauge(document.getElementById('cpuGauge')).setOptions({
 });
 cpuG.maxValue=100; cpuG.setMinValue(0); cpuG.animationSpeed=32; cpuG.set(0);
 
-// --- DISPLAY 7 SEGMENTOS — TEMPERATURA ---
-// Usa retângulos SVG simples para cada segmento.
-// Layout clássico de 7 segmentos:
-//  aaa
-// f   b
-// f   b
-//  ggg
-// e   c
-// e   c
-//  ddd
-var SEG_DIGITS = {
-  '0':[1,1,1,1,1,1,0],
-  '1':[0,1,1,0,0,0,0],
-  '2':[1,1,0,1,1,0,1],
-  '3':[1,1,1,1,0,0,1],
-  '4':[0,1,1,0,0,1,1],
-  '5':[1,0,1,1,0,1,1],
-  '6':[1,0,1,1,1,1,1],
-  '7':[1,1,1,0,0,0,0],
-  '8':[1,1,1,1,1,1,1],
-  '9':[1,1,1,1,0,1,1]
-};
-
-function drawDigit(digit, x, col) {
-  var segs = SEG_DIGITS[digit] || [0,0,0,0,0,0,0];
-  var on = col, off = '#e5e7eb';
-  var W=22, H=40, sw=4, sl=14; // sw=espessura, sl=comprimento segmento
-  // posições: [x,y,w,h,rx] de cada segmento a..g
-  var rects = [
-    [x+4,   0,   sl, sw, 2],  // a topo
-    [x+W-sw,sw+2,sw, sl, 2],  // b dir-cima
-    [x+W-sw,sl+sw+4,sw,sl,2], // c dir-baixo
-    [x+4,   H-sw,sl, sw, 2],  // d base
-    [x,     sl+sw+4,sw,sl,2], // e esq-baixo
-    [x,     sw+2,sw, sl, 2],  // f esq-cima
-    [x+4,   H/2-sw/2,sl,sw,2] // g meio
-  ];
-  var out = '';
-  for (var i=0;i<7;i++) {
-    var r=rects[i];
-    out += '<rect x="'+r[0]+'" y="'+r[1]+'" width="'+r[2]+'" height="'+r[3]+'" rx="'+r[4]+'" fill="'+(segs[i]?on:off)+'"/>';
-  }
-  return out;
-}
+// --- GAUGE TEMP SVG ---
+// Semicírculo: r=85, comprimento=267px (PI*85)
+// Escala 0-80°C mapeada para 0-267px
+var TEMP_MAX = 80;
+var ARC_LEN  = 267;
 
 function setTemp(t) {
-  var col = t < 50 ? '#22c55e' : t < 70 ? '#f59e0b' : '#ef4444';
-  var txt = String(Math.round(t));
-  var digits = txt.split('');
-  var DW = 28; // largura de cada dígito + gap
-  var H  = 40;
-  var totalW = digits.length * DW + 32; // +32 para °C
+    var pct  = Math.min(Math.max(t / TEMP_MAX, 0), 1);
+    var fill = Math.round(pct * ARC_LEN);
+    var col  = t < 50 ? '#22c55e' : t < 70 ? '#f59e0b' : '#ef4444';
 
-  var svg = '<svg width="'+totalW+'" height="'+(H+4)+'" viewBox="0 0 '+totalW+' '+(H+4)+'">';
+    // Arco de progresso via stroke-dasharray
+    var arc = document.getElementById('tArc');
+    arc.setAttribute('stroke', col);
+    arc.setAttribute('stroke-dasharray', fill + ' ' + ARC_LEN);
 
-  // dígitos
-  for (var i=0; i<digits.length; i++) {
-    svg += drawDigit(digits[i], i*DW, col);
-  }
-
-  // símbolo °
-  var ox = digits.length * DW + 2;
-  svg += '<circle cx="'+(ox+4)+'" cy="5" r="3.5" fill="none" stroke="'+col+'" stroke-width="2"/>';
-
-  // C (apenas segmentos a, f, e, d)
-  var cx = ox + 12;
-  svg += drawDigit('0', cx, col); // usa 0 mas apaga b e c
-  // sobrepõe b e c com off para virar C
-  var offc = '#e5e7eb';
-  // b dir-cima do C
-  svg += '<rect x="'+(cx+18)+'" y="6" width="4" height="14" rx="2" fill="'+offc+'"/>';
-  // c dir-baixo do C
-  svg += '<rect x="'+(cx+18)+'" y="24" width="4" height="14" rx="2" fill="'+offc+'"/>';
-  // g meio do C
-  svg += '<rect x="'+(cx+4)+'" y="'+(H/2-2)+'" width="14" height="4" rx="2" fill="'+offc+'"/>';
-
-  svg += '</svg>';
-
-  document.getElementById('tempDisplay').innerHTML = svg;
-  document.getElementById('tempVal').textContent = t + ' °C';
-  document.getElementById('tempVal').style.color = col;
+    // Agulha: ângulo de -180° (esquerda) a 0° (direita)
+    // cx=110, cy=115, r=78 (um pouco menor que o arco)
+    var angle = Math.PI * (1 - pct); // PI=esquerda, 0=direita
+    var r = 78;
+    var cx = 110, cy = 115;
+    var x2 = cx + r * Math.cos(Math.PI - angle);
+    var y2 = cy - r * Math.sin(Math.PI - angle);
+    // simplificando: ângulo começa em 180° (esquerda) vai para 0° (direita)
+    var rad = Math.PI - (pct * Math.PI);
+    x2 = Math.round(cx + r * Math.cos(rad));
+    y2 = Math.round(cy - r * Math.sin(rad));
+    var nd = document.getElementById('tNeedle');
+    nd.setAttribute('x2', x2);
+    nd.setAttribute('y2', y2);
+    nd.setAttribute('stroke', col);
 }
 
 // --- CHARTS ---
