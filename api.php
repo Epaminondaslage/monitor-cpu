@@ -361,7 +361,7 @@ if ($dockerBin && is_readable('/var/run/docker.sock')) {
         $dockerOk = true;
         foreach (explode("\n", $dockerList) as $line) {
             $line = trim($line);
-            if (!$line || !strpos($line, '|') !== false) continue;
+            if (!$line || strpos($line, '|') === false) continue;
             $parts = explode('|', $line, 3);
             $containers[] = [
                 'name'   => trim($parts[0] ?? ''),
